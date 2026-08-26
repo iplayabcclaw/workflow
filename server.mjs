@@ -4,7 +4,6 @@ import { existsSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import mysql from 'mysql2/promise';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
@@ -22,9 +21,17 @@ const SUBMIT_URL = 'https://autodl.art/api/v1/comfyui/comfyui_workflow/minimax_h
 const TEXT_SUBMIT_URL = 'https://autodl.art/api/v1/comfyui/comfyui_workflow/minimax_h3_lightx2v_no_pic';
 const RESULT_URL = 'https://autodl.art/api/v1/comfyui/comfyui_workflow/result/';
 const PORT = Number(process.env.PORT || 3000);
-const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 15000);
+const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 60000);
 const MAX_SEED = 999_999_999_999_999;
-const openFile = promisify(execFile);
+function launchFolder(folder) {
+  if (process.platform === 'win32') {
+    // /select forces Explorer to resolve the path in the interactive desktop.
+    execFile('explorer.exe', ['/select,', folder], { windowsHide: false }, () => {});
+    return;
+  }
+  const command = process.platform === 'darwin' ? 'open' : 'xdg-open';
+  execFile(command, [folder], () => {});
+}
 const TOKEN = process.env.AUTODL_TOKEN;
 const db = mysql.createPool({ host: process.env.MYSQL_HOST || '127.0.0.1', port: Number(process.env.MYSQL_PORT || 3306), user: process.env.MYSQL_USER, password: process.env.MYSQL_PASSWORD, database: process.env.MYSQL_DATABASE || 'minimax_h3_workflow', waitForConnections: true, connectionLimit: 5, charset: 'utf8mb4' });
 
@@ -202,24 +209,24 @@ const server = createServer(async (req, res) => {
       if (!['768p横', '768p竖'].includes(input.resolution)) throw new Error('画幅仅支持 768p横 或 768p竖');
       const seed = isTextWorkflow ? null : (input.seed === '' || input.seed === undefined || input.seed === null ? randomSeed() : Number(input.seed));
       if (!isTextWorkflow && (!Number.isSafeInteger(seed) || seed < 1 || seed > MAX_SEED)) throw new Error(`seed 必须是 1–${MAX_SEED} 的整数`);
-      let imageDataUrl = !isTextWorkflow ? input.image_data_url || null : null;
+      let imageDataUrls = !isTextWorkflow ? (Array.isArray(input.image_data_urls) ? input.image_data_urls : input.image_data_url ? [input.image_data_url] : []) : [];
       let audioDataUrls = !isTextWorkflow ? (Array.isArray(input.audio_data_urls) ? input.audio_data_urls : input.audio_data_url ? [input.audio_data_url] : []) : [];
-      let imagePath = imageDataUrl ? await saveDataUrl(imageDataUrl, 'image') : null;
+      let imagePaths = await Promise.all(imageDataUrls.map(image => saveDataUrl(image, 'image')));
       let audioPaths = await Promise.all(audioDataUrls.map(audio => saveDataUrl(audio, 'audio')));
       if (!isTextWorkflow && input.reuse_task_id) {
         if (!/^[a-f0-9-]{36}$/i.test(input.reuse_task_id)) throw new Error('复用任务 ID 无效');
         const [sourceRows] = await db.execute('SELECT image_path, audio_path FROM video_tasks WHERE task_id=?', [input.reuse_task_id]);
         const source = sourceRows[0];
         if (!source) throw new Error('复用的历史任务不存在');
-        if (!imageDataUrl && source.image_path) { imageDataUrl = await localFileDataUrl(source.image_path); imagePath = source.image_path; }
+        if (imageDataUrls.length === 0 && source.image_path) { const sourcePaths = filePathList(source.image_path); imageDataUrls = await Promise.all(sourcePaths.map(localFileDataUrl)); imagePaths = sourcePaths; }
         if (audioDataUrls.length === 0 && source.audio_path) { const sourcePaths = filePathList(source.audio_path); audioDataUrls = await Promise.all(sourcePaths.map(localFileDataUrl)); audioPaths = sourcePaths; }
-        if (source.image_path && !imageDataUrl) throw new Error('历史参考图片已不在本地');
+        if (source.image_path && imageDataUrls.some(image => !image)) throw new Error('历史参考图片已不在本地');
         if (source.audio_path && audioDataUrls.some(audio => !audio)) throw new Error('历史参考音频已不在本地');
       }
       const payload = isTextWorkflow
         ? { prompt: input.prompt.trim(), duration, resolution: input.resolution }
         : { duration, prompt: input.prompt.trim(), resolution: input.resolution, seed };
-      if (imageDataUrl) payload.ref_image_0 = imageDataUrl;
+      imageDataUrls.forEach((image, index) => { if (image) payload[`ref_image_${index}`] = image; });
       audioDataUrls.forEach((audio, index) => { if (audio) payload[`ref_audio_${index}`] = audio; });
       const submitUrl = isTextWorkflow ? TEXT_SUBMIT_URL : SUBMIT_URL;
       console.log('[submit:request]', { workflow: input.workflow_type, url: submitUrl, payload: submissionLogPayload(payload) });
@@ -234,7 +241,7 @@ const server = createServer(async (req, res) => {
         for (const key of ['ref_image_0', 'ref_audio_0']) if (safePayload[key]) safePayload[key] = '[base64 文件内容已省略]';
         return json(res, 422, { error: response.msg || `提交失败 (${remote.status})`, request_payload: safePayload, remote_response: response });
       }
-      await db.execute('INSERT INTO video_tasks (task_id,prompt,duration,resolution,seed,image_path,audio_path,status,remote_response,workflow_type) VALUES (?,?,?,?,?,?,?,?,?,?)', [response.data.task_id, payload.prompt, duration, payload.resolution, isTextWorkflow ? null : payload.seed, imagePath, audioPaths.length ? JSON.stringify(audioPaths) : null, response.data.status || 'QUEUED', JSON.stringify(response), input.workflow_type]);
+      await db.execute('INSERT INTO video_tasks (task_id,prompt,duration,resolution,seed,image_path,audio_path,status,remote_response,workflow_type) VALUES (?,?,?,?,?,?,?,?,?,?)', [response.data.task_id, payload.prompt, duration, payload.resolution, isTextWorkflow ? null : payload.seed, imagePaths.length ? JSON.stringify(imagePaths) : null, audioPaths.length ? JSON.stringify(audioPaths) : null, response.data.status || 'QUEUED', JSON.stringify(response), input.workflow_type]);
       return json(res, 201, { task_id: response.data.task_id, status: response.data.status || 'QUEUED' });
     }
     if (req.method === 'POST' && /^\/api\/tasks\/[^/]+\/refresh$/.test(url.pathname)) {
@@ -251,7 +258,7 @@ const server = createServer(async (req, res) => {
       if (!/^[a-f0-9-]{36}$/i.test(taskId)) return json(res, 400, { error: '任务 ID 无效' });
       const folder = join(RESULT_DIR, taskId);
       if (!existsSync(folder)) return json(res, 404, { error: '该任务尚未下载任何本地文件' });
-      await openFile('open', [folder]);
+      launchFolder(folder);
       return json(res, 200, { folder });
     }
     if (req.method === 'GET' && /^\/api\/tasks\/[^/]+\/retry-data$/.test(url.pathname)) {
@@ -261,8 +268,9 @@ const server = createServer(async (req, res) => {
       const original = rows[0];
       if (!original) return json(res, 404, { error: '原任务不存在' });
       const workflowType = original.workflow_type || 'image_audio';
+      const imagePaths = filePathList(original.image_path);
       const audioPaths = filePathList(original.audio_path);
-      return json(res, 200, { task_id: taskId, workflow_type: workflowType, prompt: original.prompt, duration: original.duration, resolution: original.resolution, seed: workflowType === 'text' ? null : Number(original.seed), image_name: original.image_path ? basename(original.image_path) : null, audio_name: audioPaths[0] ? basename(audioPaths[0]) : null, audio_names: audioPaths.map(basename), can_reuse_image: Boolean(original.image_path && existsSync(original.image_path)), can_reuse_audio: audioPaths.length > 0 && audioPaths.every(existsSync) });
+      return json(res, 200, { task_id: taskId, workflow_type: workflowType, prompt: original.prompt, duration: original.duration, resolution: original.resolution, seed: workflowType === 'text' ? null : Number(original.seed), image_name: imagePaths[0] ? basename(imagePaths[0]) : null, image_names: imagePaths.map(file => basename(file)), audio_name: audioPaths[0] ? basename(audioPaths[0]) : null, audio_names: audioPaths.map(file => basename(file)), can_reuse_image: imagePaths.length > 0 && imagePaths.every(file => existsSync(file)), can_reuse_audio: audioPaths.length > 0 && audioPaths.every(file => existsSync(file)) });
     }
     if (req.method === 'GET' && url.pathname.startsWith('/files/')) {
       const relativePath = decodeURIComponent(url.pathname.slice('/files/'.length));
