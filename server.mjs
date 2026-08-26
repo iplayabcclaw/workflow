@@ -67,7 +67,7 @@ function resultContentType(file) {
 }
 function localFileContentType(file) {
   const extension = file.split('.').pop()?.toLowerCase();
-  return ({ jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4', aac: 'audio/aac', ogg: 'audio/ogg' })[extension] || 'application/octet-stream';
+  return ({ jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', mp3: 'audio/mpeg', mpeg: 'audio/mpeg', mpga: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4', aac: 'audio/aac', ogg: 'audio/ogg' })[extension] || 'application/octet-stream';
 }
 async function localFileDataUrl(file) {
   if (!file || !existsSync(file)) return null;
