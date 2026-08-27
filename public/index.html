@@ -1,6 +1,80 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>H3 视频工作流</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/preview.css"></head>
-<body><main><header><div><p class="eyebrow">AUTODL · MINIMAX H3</p><h1>图片 / 音频生成视频</h1><p>提交后自动轮询状态；成功资源会立即下载到本机。</p></div><span id="connection" class="badge">检查配置中…</span></header>
-<nav class="app-tabs" aria-label="页面导航"><button class="app-tab active" type="button" data-view="generation">生成视频</button><button class="app-tab" type="button" data-view="history">历史记录</button></nav>
-<section id="generationView" class="workbench"><div class="panel"><div class="tabs" role="tablist"><button class="tab active" type="button" role="tab" data-workflow="image_audio">图生视频</button><button class="tab" type="button" role="tab" data-workflow="text">文生视频</button></div><form id="form"><input id="workflowType" name="workflow_type" type="hidden" value="image_audio"><label>视频提示词<textarea name="prompt" required placeholder="描述人物、动作、镜头和声音…"></textarea></label><div id="referenceFields" class="grid drop-zone"><label>参考图片（可选）<input name="image" type="file" accept="image/*" multiple></label><label>参考音频（可选，可多选）<input name="audio" type="file" accept="audio/*" multiple></label></div><div id="imagePreview" class="image-preview"></div><div class="grid"><label>时长（秒）<input id="duration" name="duration" type="number" min="1" max="15" value="15" required></label><label>画幅<select id="resolution" name="resolution"><option>768p竖</option><option>768p横</option></select></label><label id="seedField">随机种子（1–999999999999999，可留空）<input name="seed" inputmode="numeric" min="1" max="999999999999999" placeholder="自动随机"></label></div><button id="submit" type="submit">生成视频</button><p id="notice" role="status"></p></form></div><aside class="request-preview"><div><p class="eyebrow">REQUEST PREVIEW</p><h2>实际请求参数</h2></div><p id="previewHint" class="muted">随填写内容实时更新；点击生成时按此 JSON 发送。</p><pre id="payloadPreview">{}</pre></aside></section>
-<section id="historyView" hidden><div class="section-title"><h2>任务记录</h2><button class="secondary" id="reload">刷新</button></div><div id="tasks" class="tasks"><p class="muted">暂无任务</p></div></section></main><script src="/app.js"></script></body></html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>MiniMax H3 工作台</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/preview.css">
+  <style>.auth-page .auth-card{box-sizing:border-box;width:min(400px,calc(100vw - 48px))!important;padding:48px 40px}</style>
+</head>
+<body>
+  <section id="loginView" class="auth-page">
+    <div class="auth-card">
+      <p class="eyebrow">MINIMAX H3 · VIDEO STUDIO</p>
+      <h1>欢迎回来</h1>
+      <p class="muted">登录后开始创建你的 AI 视频。</p>
+      <form id="loginForm">
+        <label>用户名<input name="username" autocomplete="username" required></label>
+        <label>密码<input name="password" type="password" autocomplete="current-password" required></label>
+        <button type="submit">登录工作台</button>
+        <button id="showRegister" class="secondary" type="button">注册新用户</button>
+        <p id="loginNotice" role="status"></p>
+      </form>
+      <form id="registerForm" hidden>
+        <label>用户名<input name="username" autocomplete="username" required pattern="[a-zA-Z0-9_.-]{3,64}"></label>
+        <label>显示名称<input name="display_name" required maxlength="100"></label>
+        <label>密码（至少 8 位）<input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
+        <button type="submit">注册并领取 10,000 积分</button>
+        <button id="showLogin" class="secondary" type="button">返回登录</button>
+        <p id="registerNotice" role="status"></p>
+      </form>
+    </div>
+  </section>
+
+  <div id="appView" hidden class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="MiniMax H3 工作台"><span class="brand-mark">M</span><span>H3 Studio</span></a><div class="pricing-notice" role="status"><span>公告</span><strong>MiniMax H3 生视频 768p：0.09 元 / 秒</strong><i></i><strong>GPT‑Image2 生图：0.1 元 / 张</strong></div>
+      <div class="topbar-right"><span id="connection" class="connection-status">检查配置中…</span><span id="currentUser" class="current-user"></span><button id="logout" class="logout-button" type="button">退出</button></div>
+    </header>
+    <aside class="sidebar" aria-label="主导航">
+      <p class="sidebar-title">工作台</p>
+      <nav class="app-tabs">
+        <button class="app-tab active" type="button" data-view="generation"><span class="nav-icon">✦</span>MiniMax 生视频</button>
+        <button class="app-tab" type="button" data-view="image-generation"><span class="nav-icon">▧</span>GPT‑Image2 生图</button>
+        <button class="app-tab" type="button" data-view="history"><span class="nav-icon">◷</span>历史记录</button>
+        <button class="app-tab" type="button" data-view="users" data-admin-only hidden><span class="nav-icon">◉</span>用户列表</button>
+        <button class="app-tab" type="button" data-view="points" data-admin-only hidden><span class="nav-icon">◎</span>积分日志</button>
+      </nav>
+      <div class="sidebar-foot">H3 VIDEO GENERATION<br>v1.0</div>
+    </aside>
+    <main class="content-area">
+      <section id="generationView">
+        <div class="page-heading"><div><p class="eyebrow">CREATE VIDEO</p><h2>MiniMax 生视频</h2><p>使用图片、音频与提示词，创建高质量动态视频。</p></div></div>
+        <section class="workbench">
+          <div class="panel generation-panel">
+            <div class="tabs" role="tablist"><button class="tab active" type="button" role="tab" data-workflow="image_audio">图生视频</button><button class="tab" type="button" role="tab" data-workflow="text">文生视频</button></div>
+            <form id="form">
+              <input id="workflowType" name="workflow_type" type="hidden" value="image_audio">
+              <label>视频提示词<textarea name="prompt" required placeholder="描述主体、动作、镜头和氛围，例如：晨雾里的银色跑车缓慢驶过海岸公路，电影感跟拍。"></textarea></label>
+              <div id="referenceFields" class="asset-zones">
+                <section id="imageZone" class="asset-drop-zone"><input id="imageInput" type="file" accept="image/*" multiple hidden><button id="imagePicker" type="button" class="asset-picker"><span class="asset-icon">▧</span><strong>参考图片</strong><small>拖入图片，或点击选择</small><em>JPG / PNG / WEBP · 可多选</em></button><div id="imagePreview" class="asset-preview"></div></section>
+                <section id="audioZone" class="asset-drop-zone"><input id="audioInput" type="file" accept="audio/*" multiple hidden><button id="audioPicker" type="button" class="asset-picker"><span class="asset-icon">♫</span><strong>参考音频</strong><small>拖入音频，或点击选择</small><em>MP3 / WAV / M4A · 可多选</em></button><div id="audioPreview" class="asset-preview"></div></section>
+              </div>
+              <div class="grid settings-grid"><label>时长（秒）<input id="duration" name="duration" type="number" min="1" max="15" value="15" required></label><label>画幅<select id="resolution" name="resolution"><option>768p竖</option><option>768p横</option></select></label></div>
+              <button id="submit" type="submit">开始生成 <span>→</span></button><p id="notice" role="status"></p>
+            </form>
+          </div>
+          <aside class="request-preview"><div><p class="eyebrow">REQUEST PREVIEW</p><h3>请求参数预览</h3></div><p id="previewHint" class="muted">提交前实时展示；文件内容以摘要显示。</p><pre id="payloadPreview">{}</pre></aside>
+        </section>
+      </section>
+      <section id="usersView" hidden><div class="page-heading compact"><div><p class="eyebrow">ADMINISTRATION</p><h2>用户列表</h2><p>创建账户并设置用户可用积分。</p></div><button class="secondary" id="toggleUserForm" type="button">创建用户</button></div><section class="panel user-admin"><form id="userForm" class="grid" hidden><label>用户名<input name="username" required pattern="[a-zA-Z0-9_.-]{3,64}"></label><label>显示名称<input name="display_name" required></label><label>初始密码（至少 8 位）<input name="password" type="password" minlength="8" required></label><label>角色<select name="role"><option value="user">普通用户</option><option value="admin">管理员</option></select></label><button type="submit">保存用户</button><p id="userNotice" role="status"></p></form><div id="users" class="tasks"></div></section></section>
+      <section id="pointsView" hidden><div class="page-heading compact"><div><p class="eyebrow">ADMINISTRATION</p><h2>积分日志</h2><p>记录视频、生图成功扣分及管理员新增或设置积分。</p></div><button class="secondary" id="reloadPoints" type="button">刷新日志</button></div><div id="pointsRecords" class="tasks"></div></section>
+      <section id="imageGenerationView" hidden><div class="page-heading"><div><p class="eyebrow">GRSAI · GPT-IMAGE-2</p><h2>GPT‑Image2 生图</h2><p>可上传参考图，并选择所需图片规格。</p></div></div><section class="workbench"><div class="panel generation-panel"><form id="imageForm"><label>图片提示词<textarea name="prompt" required placeholder="描述画面主体、风格、构图、光线与细节。"></textarea></label><section id="gptImageZone" class="asset-drop-zone"><input id="gptImageInput" type="file" accept="image/*" multiple hidden><button id="gptImagePicker" type="button" class="asset-picker"><span class="asset-icon">▧</span><strong>上传参考图片</strong><small>拖入图片，或点击选择</small><em>JPG / PNG / WEBP · 可多选</em></button><div id="gptImagePreview" class="asset-preview"></div></section><label>图片规格<select name="aspect_ratio"><option value="auto">auto</option><option value="1024x1024">1024x1024（1:1，1K）</option><option value="1672x941">1672x941（16:9，1K）</option><option value="941x1672">941x1672（9:16，1K）</option><option value="1443x1090">1443x1090（4:3，1K）</option><option value="1090x1443">1090x1443（3:4，1K）</option><option value="1536x1024">1536x1024（3:2，1K）</option><option value="1024x1536">1024x1536（2:3，1K）</option><option value="1408x1120">1408x1120（5:4，1K）</option><option value="1120x1408">1120x1408（4:5，1K）</option><option value="1920x832">1920x832（21:9，1K）</option><option value="832x1920">832x1920（9:21，1K）</option><option value="1792x896">1792x896（2:1，1K）</option><option value="896x1792">896x1792（1:2，1K）</option></select></label><button id="imageSubmit" type="submit">开始生图 <span>→</span></button><p id="imageNotice" role="status"></p></form></div><aside class="request-preview"><div><p class="eyebrow">REQUEST PREVIEW</p><h3>生图请求参数</h3></div><pre id="imagePayloadPreview">{}</pre></aside></section></section>
+      <section id="historyView" hidden><div class="page-heading compact"><div><p class="eyebrow">YOUR LIBRARY</p><h2>历史记录</h2></div><button class="secondary" id="reload">刷新记录</button></div><div class="tabs history-tabs" role="tablist"><button class="tab active" type="button" data-history-type="video">生视频</button><button class="tab" type="button" data-history-type="image">生图</button></div><div id="historyItems" class="tasks"><p class="muted">暂无任务</p></div></section>
+    </main>
+  </div>
+  <aside id="ledgerDrawer" class="ledger-drawer" hidden aria-label="积分日志详情"><div class="ledger-drawer-head"><div><p class="eyebrow">详情</p><h2 id="ledgerDrawerModel">—</h2><p id="ledgerDrawerTask" class="muted"></p></div><button id="closeLedgerDrawer" class="drawer-close" type="button" aria-label="关闭">×</button></div><div class="ledger-metrics"><article><span>积分</span><strong id="ledgerDrawerPoints">—</strong></article><article><span>完成耗时（秒）</span><strong id="ledgerDrawerElapsed">—</strong></article><article><span>结果类型</span><strong id="ledgerDrawerStatus">—</strong></article></div><section class="ledger-detail-grid"><article class="ledger-json-card"><h3>请求参数</h3><pre id="ledgerDrawerRequest"></pre></article><article class="ledger-json-card"><h3>结果 URL</h3><div id="ledgerDrawerUrls" class="ledger-urls"></div></article></section></aside><div id="ledgerDrawerBackdrop" class="ledger-backdrop" hidden></div>
+  <script src="/app.js"></script>
+</body>
+</html>
